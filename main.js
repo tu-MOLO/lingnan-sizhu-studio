@@ -9,12 +9,12 @@ function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    title: "岭南丝竹 · Gongche Studio",
+    title: '岭南丝竹 · Gongche Studio',
     icon: path.join(__dirname, 'public/favicon.png'),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-    }
+    },
   });
 
   mainWindow.setMenuBarVisibility(false);

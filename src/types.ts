@@ -14,19 +14,19 @@ export interface Instrument {
   character: string;
   icon: string;
   notes: {
-    name: string;      // Gongche character, e.g. "合", "四"
-    pitch: string;     // Western notation, e.g. "G3", "A3"
+    name: string; // Gongche character, e.g. "合", "四"
+    pitch: string; // Western notation, e.g. "G3", "A3"
     frequency: number; // Hz
     description?: string;
   }[];
 }
 
 export interface SongNote {
-  pitch: string;     // Western, e.g. "C4"
-  gongche: string;   // Gongche notation, e.g. "上"；休止符记为 "休"
-  duration: number;  // Beat length, e.g., 1 for quarter note, 0.5 for eighth note, 2 for half note
-  beated?: boolean;  // Whether it has a standard board (板/眼) clap
-  rest?: boolean;    // 休止符：只占时值，不发声、不计分
+  pitch: string; // Western, e.g. "C4"
+  gongche: string; // Gongche notation, e.g. "上"；休止符记为 "休"
+  duration: number; // Beat length, e.g., 1 for quarter note, 0.5 for eighth note, 2 for half note
+  beated?: boolean; // Whether it has a standard board (板/眼) clap
+  rest?: boolean; // 休止符：只占时值，不发声、不计分
 }
 
 export interface Repertoire {
