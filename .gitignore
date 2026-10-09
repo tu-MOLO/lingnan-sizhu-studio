@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+coverage/
+
+# Electron packaged output (binaries are published via GitHub Releases, not Git)
+release-final/
+
+# Local environment variables
+.env
+.env.*
+!.env.example
+
+# AI Studio / agent tooling markers
+.aistudio
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Large local audio verification renders
+assets/*.wav
+
+# Operating system
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors / IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# Misc
+*.local

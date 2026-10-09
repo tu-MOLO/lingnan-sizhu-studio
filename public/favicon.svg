@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#5A5A40"/>
+  <rect x="10" y="10" width="44" height="44" rx="6" fill="none" stroke="#F5F2ED" stroke-width="2.5" opacity="0.9"/>
+  <path d="M10 32 H54 M32 10 V54" stroke="#F5F2ED" stroke-width="1.4" opacity="0.45"/>
+  <text x="32" y="43" text-anchor="middle" font-family="Songti SC, SimSun, serif" font-size="30" font-weight="700" fill="#F5F2ED">尺</text>
+</svg>

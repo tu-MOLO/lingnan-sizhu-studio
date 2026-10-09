@@ -1,0 +1,39 @@
+{
+  "name": "lingnan-sizhu-studio",
+  "version": "1.0.0",
+  "description": "岭南丝竹 · Gongche Studio —— 用纯 Web Audio 物理建模复原高胡/扬琴/潮州筝，并让工尺谱可听、可玩、可识唱的交互系统",
+  "author": "Molo",
+  "license": "MIT",
+  "private": true,
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port=3000 --host=0.0.0.0",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.1.14",
+    "@vitejs/plugin-react": "^5.0.4",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "vite": "^6.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "autoprefixer": "^10.4.21",
+    "electron": "^42.3.3",
+    "electron-builder": "^26.15.0",
+    "esbuild": "^0.25.0",
+    "tailwindcss": "^4.1.14",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.3"
+  }
+}
