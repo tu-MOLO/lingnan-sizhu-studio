@@ -1,0 +1,15 @@
+appId: com.molo.lingnan-sizhu
+productName: 岭南丝竹
+copyright: Copyright (c) 2026 Molo (MIT License)
+directories:
+  output: release-final
+files:
+  - dist/**/*
+  - main.js
+  - package.json
+win:
+  target:
+    - target: portable
+  icon: public/favicon.ico
+portable:
+  artifactName: LingnanSizhuStudio-${version}.${ext}
