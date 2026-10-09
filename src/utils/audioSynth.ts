@@ -26,7 +26,13 @@ let masterInput: GainNode | null = null;
 export function getAudioContext(): AudioContext {
   if (!globalAudioCtx) {
     // Standard initialization, compatible with most modern browsers
-    globalAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const AudioCtxCtor =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtxCtor) {
+      throw new Error('当前浏览器不支持 Web Audio API。');
+    }
+    globalAudioCtx = new AudioCtxCtor();
     buildMasterBus(globalAudioCtx);
   }
   // Try to resume if suspended (due to browser autoplay policies)
@@ -118,7 +124,13 @@ function getLoopPinkNoise(ctx: AudioContext): AudioBuffer {
   const data = buffer.getChannelData(0);
 
   // Paul Kellet 粉噪近似滤波器
-  let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+  let b0 = 0,
+    b1 = 0,
+    b2 = 0,
+    b3 = 0,
+    b4 = 0,
+    b5 = 0,
+    b6 = 0;
   for (let i = 0; i < length; i++) {
     const white = Math.random() * 2 - 1;
     b0 = 0.99886 * b0 + white * 0.0555179;
@@ -315,7 +327,7 @@ export function renderPluckedString(
 const YANGQIN_LENGTH_SEC = 2.6;
 const ZHENG_LENGTH_SEC = 3.8;
 
-export function yangqinRenderOptions(frequency: number): PluckedRenderOptions {
+export function yangqinRenderOptions(_frequency: number): PluckedRenderOptions {
   return {
     lengthSec: YANGQIN_LENGTH_SEC,
     courses: 2, // 扬琴同度双弦
@@ -336,7 +348,10 @@ export function yangqinRenderOptions(frequency: number): PluckedRenderOptions {
   };
 }
 
-export function zhengRenderOptions(frequency: number, bendSemitones: number): PluckedRenderOptions {
+export function zhengRenderOptions(
+  _frequency: number,
+  bendSemitones: number
+): PluckedRenderOptions {
   return {
     lengthSec: ZHENG_LENGTH_SEC,
     courses: 1,
@@ -401,7 +416,11 @@ function getZhengBuffer(ctx: AudioContext, frequency: number, bendSemitones: num
   const key = `zheng:${Math.round(frequency * 100)}:${Math.round(bend * 100)}:${ctx.sampleRate}`;
   const cached = bufferCache.get(key);
   if (cached) return cached;
-  const samples = renderPluckedString(ctx.sampleRate, frequency, zhengRenderOptions(frequency, bend));
+  const samples = renderPluckedString(
+    ctx.sampleRate,
+    frequency,
+    zhengRenderOptions(frequency, bend)
+  );
   const buffer = monoToBuffer(ctx, samples);
   bufferCache.set(key, buffer);
   return buffer;
@@ -464,7 +483,11 @@ export function playYangqin(frequency: number, duration: number = 1.2): void {
 }
 
 // Play Guzheng / Chaozhou Zheng：波导单弦 + 按滑吟弦 + 深沉木箱共鸣
-export function playZheng(frequency: number, duration: number = 2.0, pitchBendSemitones: number = 0): void {
+export function playZheng(
+  frequency: number,
+  duration: number = 2.0,
+  pitchBendSemitones: number = 0
+): void {
   const ctx = getAudioContext();
   const buffer = getZhengBuffer(ctx, frequency, pitchBendSemitones);
 
@@ -506,7 +529,9 @@ export function playZheng(frequency: number, duration: number = 2.0, pitchBendSe
 // ============================================================================
 
 // 高胡钢弦明亮频谱：基频与 2-6 次谐波都很强（钢弦/小琴筒/蟒皮紧，高频泛音丰富），高次缓慢衰减
-const GAOHU_HARMONICS = [0, 1, 0.78, 0.62, 0.5, 0.4, 0.3, 0.22, 0.15, 0.1, 0.065, 0.04, 0.025, 0.015];
+const GAOHU_HARMONICS = [
+  0, 1, 0.78, 0.62, 0.5, 0.4, 0.3, 0.22, 0.15, 0.1, 0.065, 0.04, 0.025, 0.015,
+];
 let gaohuPeriodicWave: PeriodicWave | null = null;
 
 function getGaohuWave(ctx: AudioContext): PeriodicWave {
@@ -532,7 +557,12 @@ interface GaohuVoice {
 let activeGaohu: GaohuVoice | null = null;
 let gaohuTokenSeq = 0;
 
-function makePeak(ctx: AudioContext, frequency: number, q: number, gainDb: number): BiquadFilterNode {
+function makePeak(
+  ctx: AudioContext,
+  frequency: number,
+  q: number,
+  gainDb: number
+): BiquadFilterNode {
   const filter = ctx.createBiquadFilter();
   filter.type = 'peaking';
   filter.frequency.value = frequency;
@@ -551,8 +581,14 @@ export function playGaohu(frequency: number, duration: number = 0.8, slide: bool
       const voice = activeGaohu;
       // 换把滑音短而有表情：快速贴住新音，避免长时间停在音高途中造成“偏低/含糊”
       const glide = slide ? 0.075 : 0.05;
-      if (voice.releaseTimer) { clearTimeout(voice.releaseTimer); voice.releaseTimer = null; }
-      if (voice.stopTimer) { clearTimeout(voice.stopTimer); voice.stopTimer = null; }
+      if (voice.releaseTimer) {
+        clearTimeout(voice.releaseTimer);
+        voice.releaseTimer = null;
+      }
+      if (voice.stopTimer) {
+        clearTimeout(voice.stopTimer);
+        voice.stopTimer = null;
+      }
 
       voice.oscMain.frequency.cancelScheduledValues(now);
       voice.oscMain.frequency.setValueAtTime(voice.oscMain.frequency.value, now);
@@ -573,7 +609,7 @@ export function playGaohu(frequency: number, duration: number = 0.8, slide: bool
 
       scheduleGaohuRelease(voice, duration + 0.15);
       return;
-    } catch (e) {
+    } catch {
       // 节点已停止/释放则重建
       cleanupGaohu();
     }
@@ -609,10 +645,10 @@ export function playGaohu(frequency: number, duration: number = 0.8, slide: bool
 
   // 琴筒声学通道：高胡琴筒细小、蟒皮绷紧，共振峰整体偏高；
   // 用峰值滤波“增强”共鸣而非带通“滤掉”泛音，保留钢弦明亮的高次谐波
-  const body1 = makePeak(ctx, 1100, 2.0, 4);    // 琴筒/蟒皮主共鸣
-  const body2 = makePeak(ctx, 2300, 2.5, 3);    // 明亮中频
-  const body3 = makePeak(ctx, 3800, 3.0, 2.2);  // 钢弦穿透感
-  const air = ctx.createBiquadFilter();         // 高频空气光泽
+  const body1 = makePeak(ctx, 1100, 2.0, 4); // 琴筒/蟒皮主共鸣
+  const body2 = makePeak(ctx, 2300, 2.5, 3); // 明亮中频
+  const body3 = makePeak(ctx, 3800, 3.0, 2.2); // 钢弦穿透感
+  const air = ctx.createBiquadFilter(); // 高频空气光泽
   air.type = 'highshelf';
   air.frequency.value = 7000;
   air.gain.value = 2.5;
@@ -660,8 +696,20 @@ export function playGaohu(frequency: number, duration: number = 0.8, slide: bool
     out,
     vibeOsc,
     nodes: [
-      oscMain, mainGain, noise, noiseHpf, noiseBandpass, bowGain,
-      body1, body2, body3, air, hpf, out, vibeOsc, vibeGain,
+      oscMain,
+      mainGain,
+      noise,
+      noiseHpf,
+      noiseBandpass,
+      bowGain,
+      body1,
+      body2,
+      body3,
+      air,
+      hpf,
+      out,
+      vibeOsc,
+      vibeGain,
     ],
     releaseTimer: null,
     stopTimer: null,
@@ -681,6 +729,30 @@ export function playGaohu(frequency: number, duration: number = 0.8, slide: bool
   scheduleGaohuRelease(voice, duration + 0.15);
 }
 
+/**
+ * 起一声可持续的长弓，用于“按住音位拉弦”的交互：不主动收弓，
+ * 必须配对调用 stopGaohu()。持续期间对别的音再次调用会自动连弓换把滑音。
+ */
+export function startGaohu(frequency: number, slide: boolean = true): void {
+  // 给一段足够长的弓段寿命；松手时由 stopGaohu 提前收弓并回收节点
+  playGaohu(frequency, 20, slide);
+}
+
+/** 收弓：取消长弓定时，立即进入自然收弓淡出并回收节点。 */
+export function stopGaohu(): void {
+  const voice = activeGaohu;
+  if (!voice) return;
+  if (voice.releaseTimer) {
+    clearTimeout(voice.releaseTimer);
+    voice.releaseTimer = null;
+  }
+  if (voice.stopTimer) {
+    clearTimeout(voice.stopTimer);
+    voice.stopTimer = null;
+  }
+  scheduleGaohuRelease(voice, 0);
+}
+
 // 弓段保持平稳发声，直到预计没有后续音时才做自然收弓（指数淡出）再回收节点
 function scheduleGaohuRelease(voice: GaohuVoice, holdSec: number): void {
   const token = voice.token;
@@ -691,7 +763,9 @@ function scheduleGaohuRelease(voice: GaohuVoice, holdSec: number): void {
     try {
       voice.out.gain.cancelScheduledValues(n);
       voice.out.gain.setTargetAtTime(0.0001, n, 0.11); // 收弓约 0.3s 自然淡出
-    } catch (e) { /* 已释放 */ }
+    } catch {
+      /* 已释放 */
+    }
     voice.stopTimer = setTimeout(() => {
       if (activeGaohu && activeGaohu.token === token) cleanupGaohu();
     }, 340);
@@ -701,15 +775,33 @@ function scheduleGaohuRelease(voice: GaohuVoice, holdSec: number): void {
 function cleanupGaohu(): void {
   if (!activeGaohu) return;
   const voice = activeGaohu;
-  if (voice.releaseTimer) { clearTimeout(voice.releaseTimer); voice.releaseTimer = null; }
-  if (voice.stopTimer) { clearTimeout(voice.stopTimer); voice.stopTimer = null; }
+  if (voice.releaseTimer) {
+    clearTimeout(voice.releaseTimer);
+    voice.releaseTimer = null;
+  }
+  if (voice.stopTimer) {
+    clearTimeout(voice.stopTimer);
+    voice.stopTimer = null;
+  }
   const stoppable: OscillatorNode[] = [voice.oscMain, voice.vibeOsc];
   for (const node of stoppable) {
-    try { node.stop(); } catch (e) { /* 已停止 */ }
+    try {
+      node.stop();
+    } catch {
+      /* 已停止 */
+    }
   }
-  try { voice.noise.stop(); } catch (e) { /* 已停止 */ }
+  try {
+    voice.noise.stop();
+  } catch {
+    /* 已停止 */
+  }
   for (const node of voice.nodes) {
-    try { node.disconnect(); } catch (e) { /* 已释放 */ }
+    try {
+      node.disconnect();
+    } catch {
+      /* 已释放 */
+    }
   }
   activeGaohu = null;
 }

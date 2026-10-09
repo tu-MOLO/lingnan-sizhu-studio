@@ -3,33 +3,85 @@
  * SPDX-License-Identifier: MIT
  */
 
-import React, { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { INSTRUMENTS } from '../data/musicData';
-import { Instrument, InstrumentId } from '../types';
-import { playGaohu, playYangqin, playZheng } from '../utils/audioSynth';
-import { Music, History, Heart, Volume2 } from 'lucide-react';
+import { InstrumentId } from '../types';
+import { playYangqin, playZheng, startGaohu, stopGaohu } from '../utils/audioSynth';
+import { History, Heart, Volume2 } from 'lucide-react';
+
+// “古韵”引擎 HUD 随乐器展示真实建模参数（避免对弓弦乐器误标波导模型）
+const HUD_CARDS: Record<InstrumentId, { title: string; value: string }[]> = {
+  gaohu: [
+    { title: '谐波谱弓弦声源', value: '13 次谐波 PeriodicWave' },
+    { title: '循环弓毛摩擦噪声', value: '粉噪 → 跟踪带通' },
+    { title: '卷积厅堂混响', value: '2.8s 厅堂脉冲响应' },
+    { title: '琴筒共振峰组', value: '1100/2300/3800Hz' },
+  ],
+  yangqin: [
+    { title: '波导弦振模型', value: 'Karplus-Strong 求解' },
+    { title: '同度多弦微失谐', value: '双弦 ±4 音分干涉' },
+    { title: '卷积厅堂混响', value: '2.8s 厅堂脉冲响应' },
+    { title: '松音板共振峰', value: '1450Hz 峰化' },
+  ],
+  zheng: [
+    { title: '波导弦振模型', value: 'Karplus-Strong 求解' },
+    { title: '左手按滑吟弦', value: '活五最深 ±1.5 半音' },
+    { title: '卷积厅堂混响', value: '2.8s 厅堂脉冲响应' },
+    { title: '桐木琴箱共鸣', value: '430/950Hz 双峰' },
+  ],
+};
 
 export default function InstrumentWorkshop() {
   const [selectedId, setSelectedId] = useState<InstrumentId>('gaohu');
-  const [lastPlayedNote, setLastPlayedNote] = useState<{ name: string; pitch: string } | null>(null);
-  const [leftHandBend, setLeftHandBend] = useState<number>(0); // Bending state for 古筝 (semitones: -1, 1, 2)
+  const [lastPlayedNote, setLastPlayedNote] = useState<{ name: string; pitch: string } | null>(
+    null
+  );
+  const [leftHandBend, setLeftHandBend] = useState<number>(0); // 潮州筝左手按滑（半音：0 / 0.5 / 1.5）
+  const [heldNoteIndex, setHeldNoteIndex] = useState<number | null>(null); // 高胡当前按住的音位
+  const bowingRef = useRef(false); // 指针 / 按键是否正处于拉弦状态
 
-  const activeInstrument = INSTRUMENTS.find(i => i.id === selectedId) || INSTRUMENTS[0];
+  const activeInstrument = INSTRUMENTS.find((i) => i.id === selectedId) || INSTRUMENTS[0];
 
+  // 弹拨乐器：点奏
   const handlePlayNote = (noteName: string, frequency: number, index: number) => {
     setLastPlayedNote({ name: noteName, pitch: activeInstrument.notes[index].pitch });
-    
-    if (selectedId === 'gaohu') {
-      // Simulate continuous glide if requested
-      playGaohu(frequency, 0.9, true);
-    } else if (selectedId === 'yangqin') {
+
+    if (selectedId === 'yangqin') {
       playYangqin(frequency, 1.4);
     } else {
-      // 古筝 Chaozhou Zheng supporting左手按滑 bending semitones
+      // 潮州筝支持左手按滑（活五）
       playZheng(frequency, 2.2, leftHandBend);
     }
   };
+
+  // 高胡：起弓 / 换到新音（持续期间复用同一琴弓，自动连弓换把滑音）
+  const bowGaohuNote = useCallback(
+    (frequency: number, index: number) => {
+      const note = activeInstrument.notes[index];
+      setLastPlayedNote({ name: note.name, pitch: note.pitch });
+      setHeldNoteIndex(index);
+      startGaohu(frequency, true);
+    },
+    [activeInstrument]
+  );
+
+  const releaseGaohu = useCallback(() => {
+    bowingRef.current = false;
+    setHeldNoteIndex(null);
+    stopGaohu();
+  }, []);
+
+  // 指针在任意处松开或组件卸载（切换模块）时收弓，避免长弓悬挂
+  useEffect(() => {
+    window.addEventListener('pointerup', releaseGaohu);
+    window.addEventListener('pointercancel', releaseGaohu);
+    return () => {
+      window.removeEventListener('pointerup', releaseGaohu);
+      window.removeEventListener('pointercancel', releaseGaohu);
+      stopGaohu();
+    };
+  }, [releaseGaohu]);
 
   return (
     <div id="instrument-workshop-container" className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -58,7 +110,9 @@ export default function InstrumentWorkshop() {
                   <div className="flex items-center space-x-3">
                     <span className="text-3xl">{inst.icon}</span>
                     <div>
-                      <h4 className="font-serif font-black tracking-wide text-base text-cultural-dark">{inst.name}</h4>
+                      <h4 className="font-serif font-black tracking-wide text-base text-cultural-dark">
+                        {inst.name}
+                      </h4>
                       <p className="text-xs text-cultural-text/60 font-medium">{inst.enName}</p>
                     </div>
                   </div>
@@ -80,15 +134,19 @@ export default function InstrumentWorkshop() {
             <History className="w-5 h-5 text-cultural-accent mt-0.5 flex-shrink-0" />
             <div>
               <h4 className="font-serif font-bold text-cultural-dark text-sm">源流与历史</h4>
-              <p className="text-xs text-cultural-text/90 mt-1 leading-relaxed">{activeInstrument.history}</p>
+              <p className="text-xs text-cultural-text/90 mt-1 leading-relaxed">
+                {activeInstrument.history}
+              </p>
             </div>
           </div>
-          
+
           <div className="flex items-start space-x-3 pt-3 border-t border-cultural-border/65">
             <Heart className="w-5 h-5 text-cultural-accent mt-0.5 flex-shrink-0" />
             <div>
               <h4 className="font-serif font-bold text-cultural-dark text-sm">音色与演奏风格</h4>
-              <p className="text-xs text-cultural-text/90 mt-1 leading-relaxed">{activeInstrument.character}</p>
+              <p className="text-xs text-cultural-text/90 mt-1 leading-relaxed">
+                {activeInstrument.character}
+              </p>
             </div>
           </div>
         </div>
@@ -122,8 +180,12 @@ export default function InstrumentWorkshop() {
                     {lastPlayedNote.name}
                   </div>
                   <div className="text-right">
-                    <div className="text-[10px] text-cultural-accent font-mono font-bold leading-none">五线谱</div>
-                    <div className="text-xs text-cultural-dark font-bold leading-tight font-mono">{lastPlayedNote.pitch}</div>
+                    <div className="text-[10px] text-cultural-accent font-mono font-bold leading-none">
+                      五线谱
+                    </div>
+                    <div className="text-xs text-cultural-dark font-bold leading-tight font-mono">
+                      {lastPlayedNote.pitch}
+                    </div>
                   </div>
                 </motion.div>
               )}
@@ -138,33 +200,41 @@ export default function InstrumentWorkshop() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                 </span>
-                <span className="text-xs font-serif font-black text-cultural-dark">岭南古乐“古韵”声学物理模拟引擎</span>
+                <span className="text-xs font-serif font-black text-cultural-dark">
+                  岭南古乐“古韵”声学物理模拟引擎
+                </span>
               </div>
-              <span className="text-[10px] font-mono text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">物理声学已启用</span>
+              <span className="text-[10px] font-mono text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                物理声学已启用
+              </span>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
-              <div className="bg-white p-2 rounded border border-cultural-border/30 text-center shadow-xs">
-                <div className="text-[10px] text-cultural-text/65 font-serif font-bold">波导弦振模型</div>
-                <div className="text-[10px] text-emerald-700 font-bold font-mono mt-0.5">† Karplus-Strong 求解</div>
-              </div>
-              <div className="bg-white p-2 rounded border border-cultural-border/30 text-center shadow-xs">
-                <div className="text-[10px] text-cultural-text/65 font-serif font-bold">同度多弦微失谐</div>
-                <div className="text-[10px] text-emerald-700 font-bold font-mono mt-0.5">† 双弦 ±4 音分干涉</div>
-              </div>
-              <div className="bg-white p-2 rounded border border-cultural-border/30 text-center shadow-xs">
-                <div className="text-[10px] text-cultural-text/65 font-serif font-bold">卷积厅堂混响</div>
-                <div className="text-[10px] text-emerald-700 font-bold font-mono mt-0.5">† 2.8s 厅堂脉冲响应</div>
-              </div>
-              <div className="bg-white p-2 rounded border border-cultural-border/30 text-center shadow-xs">
-                <div className="text-[10px] text-cultural-text/65 font-serif font-bold">琴体共振峰滤波组</div>
-                <div className="text-[10px] text-emerald-700 font-bold font-mono mt-0.5">† 780Hz 竹筒/蟒皮</div>
-              </div>
+              {HUD_CARDS[selectedId].map((card) => (
+                <div
+                  key={card.title}
+                  className="bg-white p-2 rounded border border-cultural-border/30 text-center shadow-xs"
+                >
+                  <div className="text-[10px] text-cultural-text/65 font-serif font-bold">
+                    {card.title}
+                  </div>
+                  <div className="text-[10px] text-emerald-700 font-bold font-mono mt-0.5">
+                    † {card.value}
+                  </div>
+                </div>
+              ))}
             </div>
             <div className="text-[11px] text-cultural-text/90 mt-2 leading-relaxed font-sans border-t border-cultural-border/40 pt-2">
-              <strong>当前乐器波形补偿 ({selectedId === 'gaohu' ? '高胡' : selectedId === 'yangqin' ? '扬琴' : '古筝'}):</strong>{' '}
-              {selectedId === 'gaohu' && '自定义谐波谱弓弦声源叠加循环弓毛摩擦噪声，穿过 780Hz 竹筒蟒皮多共振峰滤波组；保留 0.6 半音换把滑奏、连弓无缝 portamento 与 5.6Hz 延迟吟音，音色明亮而带鼻音。'}
-              {selectedId === 'yangqin' && 'Karplus-Strong 波导弦振直接求解钢丝振动，同度双弦 ±4 音分微失谐产生干涉脉振，叠加琴竹击弦噪声瞬态与高频金属泛音，余音经松音板共振峰与厅堂卷积混响自然收束。'}
-              {selectedId === 'zheng' && '波导单弦在采样级复刻拨弦张力沉降、指甲擦拂瞬态与左手按滑：100ms 后平滑压至活五目标音高，150ms 缓释起 4.6Hz 深度吟猱，桐木琴箱双共鸣峰令余韵悠远。'}
+              <strong>
+                当前乐器建模链路（
+                {selectedId === 'gaohu' ? '高胡' : selectedId === 'yangqin' ? '扬琴' : '潮州筝'}
+                ）：
+              </strong>{' '}
+              {selectedId === 'gaohu' &&
+                '自定义 13 次谐波的 PeriodicWave 弓弦声源，叠加循环粉噪弓毛摩擦声，穿过 1100/2300/3800Hz 琴筒蟒皮共振峰与 7kHz 空气高频峰；起弓带 0.35 半音绰音、连弓 75ms 换把滑音与 5.2Hz 延迟吟音，音色明亮通透、线条连贯。'}
+              {selectedId === 'yangqin' &&
+                'Karplus-Strong 波导弦振直接求解钢丝振动，同度双弦 ±4 音分微失谐产生干涉脉振，叠加琴竹击弦噪声瞬态与高频金属泛音，余音经松音板共振峰与厅堂卷积混响自然收束。'}
+              {selectedId === 'zheng' &&
+                '波导单弦在采样级复刻拨弦张力沉降、指甲擦拂瞬态与左手按滑：100ms 后平滑压至活五目标音高，150ms 缓释起 4.6Hz 深度吟猱，桐木琴箱双共鸣峰令余韵悠远。'}
             </div>
           </div>
         </div>
@@ -172,14 +242,36 @@ export default function InstrumentWorkshop() {
         {/* Visualizers / Instrument strings */}
         <div className="flex-1 flex flex-col items-center justify-center py-6">
           {selectedId === 'gaohu' && (
+            <div className="w-full max-w-sm mb-4 bg-cultural-accent/5 border border-cultural-border/70 rounded-xl px-4 py-3">
+              <p className="text-[11px] font-serif font-bold text-cultural-dark mb-1.5 flex items-center gap-1.5">
+                <Volume2 className="w-3.5 h-3.5 text-cultural-accent" />
+                高胡演奏技法
+              </p>
+              <p className="text-[11px] text-cultural-text/85 leading-relaxed font-sans">
+                <strong>按住</strong>音位可持续拉弦；按住并<strong>上下拖过</strong>相邻音位，可模拟
+                “一弓多音”的换把滑音；松弓即自然收音。键盘聚焦后用空格 / 回车同样可以拉奏。
+              </p>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {['连弓 legato', '换把滑音 portamento', '延迟揉弦 vibrato'].map((tag) => (
+                  <span
+                    key={tag}
+                    className="text-[10px] font-serif font-bold text-cultural-accent bg-white border border-cultural-border/60 rounded-full px-2 py-0.5"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {selectedId === 'gaohu' && (
             <div className="relative w-full max-w-sm h-[480px] sm:h-[550px] bg-white rounded-2xl border border-cultural-border flex flex-col items-center overflow-hidden shadow-xs">
               {/* Wooden shaft of Gaohu */}
               <div className="absolute top-0 bottom-0 w-8 bg-gradient-to-r from-cultural-dark via-cultural-accent to-cultural-dark shadow-md"></div>
-              
+
               {/* String nodes */}
               <div className="absolute top-0 bottom-0 left-[43%] w-0.5 bg-cultural-border shadow-sm opacity-80"></div>
               <div className="absolute top-0 bottom-0 left-[57%] w-0.5 bg-cultural-border shadow-sm opacity-80"></div>
-              
+
               {/* Sound peg (千斤) tying binding */}
               <div className="absolute top-12 left-1/2 -translate-x-1/2 w-14 h-4 bg-cultural-bg border border-cultural-border rounded-sm flex items-center justify-center text-[10px] font-bold text-cultural-accent">
                 千斤束
@@ -194,20 +286,59 @@ export default function InstrumentWorkshop() {
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
                       key={note.name + index}
-                      onClick={() => handlePlayNote(note.name, note.frequency, index)}
-                      className={`relative flex items-center justify-between p-2 rounded-xl border group transition-all text-cultural-text shadow-xs cursor-pointer flex-shrink-0 ${
-                        isOuterString
-                          ? 'bg-cultural-bg hover:bg-cultural-accent/15 border-cultural-border/60 ml-2 mr-8'
-                          : 'bg-cultural-panel hover:bg-cultural-accent/15 border-cultural-border/60 mr-2 ml-8'
+                      type="button"
+                      aria-pressed={heldNoteIndex === index}
+                      aria-label={`高胡音位 ${note.name}，音名 ${note.pitch}，按住持续拉弦、拖动可换把`}
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        bowingRef.current = true;
+                        bowGaohuNote(note.frequency, index);
+                      }}
+                      onPointerEnter={() => {
+                        if (bowingRef.current) bowGaohuNote(note.frequency, index);
+                      }}
+                      onKeyDown={(e) => {
+                        if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+                          e.preventDefault();
+                          bowingRef.current = true;
+                          bowGaohuNote(note.frequency, index);
+                        }
+                      }}
+                      onKeyUp={(e) => {
+                        if (e.key === ' ' || e.key === 'Enter') {
+                          e.preventDefault();
+                          releaseGaohu();
+                        }
+                      }}
+                      className={`relative flex items-center justify-between p-2 rounded-xl border group transition-all text-cultural-text shadow-xs cursor-pointer flex-shrink-0 select-none touch-none ${
+                        isOuterString ? 'ml-2 mr-8 ' : 'mr-2 ml-8 '
+                      }${
+                        heldNoteIndex === index
+                          ? 'bg-cultural-accent/20 border-cultural-accent ring-2 ring-cultural-accent/60'
+                          : 'bg-cultural-bg hover:bg-cultural-accent/15 border-cultural-border/60'
                       }`}
                     >
                       <div className="flex items-center space-x-2">
-                        <span className="w-6 h-6 rounded-full bg-cultural-text text-white font-serif text-xs font-bold flex items-center justify-center group-hover:bg-cultural-accent">
+                        <span
+                          className={`w-6 h-6 rounded-full text-white font-serif text-xs font-bold flex items-center justify-center ${
+                            heldNoteIndex === index
+                              ? 'bg-cultural-accent'
+                              : 'bg-cultural-text group-hover:bg-cultural-accent'
+                          }`}
+                        >
                           {note.name}
                         </span>
-                        <span className="text-xs font-mono font-bold text-cultural-text">{note.pitch}</span>
+                        <span className="text-xs font-mono font-bold text-cultural-text">
+                          {note.pitch}
+                        </span>
                       </div>
-                      <Volume2 className="w-3.5 h-3.5 text-cultural-border group-hover:text-cultural-accent" />
+                      <Volume2
+                        className={`w-3.5 h-3.5 ${
+                          heldNoteIndex === index
+                            ? 'text-cultural-accent animate-pulse'
+                            : 'text-cultural-border group-hover:text-cultural-accent'
+                        }`}
+                      />
                     </motion.button>
                   );
                 })}
@@ -220,7 +351,7 @@ export default function InstrumentWorkshop() {
               {/* Trapezoid wood visual sides */}
               <div className="absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-cultural-dark to-cultural-accent shadow-sm"></div>
               <div className="absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-cultural-dark to-cultural-accent shadow-sm"></div>
-              
+
               {/* Bridges (琴码) lines */}
               <div className="absolute top-0 bottom-0 left-[35%] w-3 bg-cultural-bg border-x border-cultural-border/80 opacity-65"></div>
               <div className="absolute top-0 bottom-0 left-[65%] w-3 bg-cultural-bg border-x border-cultural-border/80 opacity-65"></div>
@@ -238,8 +369,10 @@ export default function InstrumentWorkshop() {
                     >
                       {/* String thin background line */}
                       <div className="absolute inset-x-0 top-1/2 h-0.5 bg-cultural-border/20 pointer-events-none group-hover:bg-cultural-accent/35"></div>
-                      
-                      <span className="relative z-10 text-[10px] font-mono text-cultural-text/80 font-bold leading-none">{note.pitch}</span>
+
+                      <span className="relative z-10 text-[10px] font-mono text-cultural-text/80 font-bold leading-none">
+                        {note.pitch}
+                      </span>
                       <span className="relative z-10 w-9 h-9 rounded-full bg-cultural-accent text-white border border-cultural-border/20 font-serif font-black flex items-center justify-center text-lg shadow-sm">
                         {note.name}
                       </span>
@@ -259,15 +392,18 @@ export default function InstrumentWorkshop() {
               <div className="relative w-full max-w-xl h-[420px] sm:h-[480px] bg-white rounded-2xl border border-cultural-border p-4 overflow-hidden flex flex-col justify-between shadow-xs mx-auto">
                 {/* Traditional Side Wood panels */}
                 <div className="absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-cultural-dark to-cultural-accent shadow-sm"></div>
-                
+
                 {/* String wires running horizontally */}
                 <div className="flex-1 flex flex-col justify-between relative z-10 px-6 sm:px-10 py-2">
                   {activeInstrument.notes.map((note, index) => {
                     return (
-                      <div key={note.name + index} className="relative flex items-center justify-between group flex-row min-h-[36px] flex-shrink-0">
+                      <div
+                        key={note.name + index}
+                        className="relative flex items-center justify-between group flex-row min-h-[36px] flex-shrink-0"
+                      >
                         {/* The string wire */}
                         <div className="absolute inset-x-8 top-1/2 -translate-y-1/2 h-[1px] bg-cultural-border/80 group-hover:bg-cultural-accent group-hover:h-[2px] transition-all" />
-                        
+
                         {/* Guzheng Bridge (码子) triangular */}
                         <div className="absolute left-[30%] -translate-y-1/2 w-4 h-4 bg-cultural-accent rotate-45 border border-cultural-dark/20 rounded-xs flex items-center justify-center shadow-xs">
                           <span className="sr-only">bridge</span>
@@ -283,7 +419,9 @@ export default function InstrumentWorkshop() {
                           {note.name}
                         </motion.button>
 
-                        <span className="text-[10px] font-mono font-bold text-cultural-text/80 w-8 text-right">{note.pitch}</span>
+                        <span className="text-[10px] font-mono font-bold text-cultural-text/80 w-8 text-right">
+                          {note.pitch}
+                        </span>
                       </div>
                     );
                   })}
@@ -295,7 +433,7 @@ export default function InstrumentWorkshop() {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div>
                     <h5 className="font-serif font-black text-cultural-dark text-sm flex items-center space-x-1.5">
-                      <span>古筝左手特色：五音按滑系统 (吟/猱/按/滑)</span>
+                      <span>潮州筝左手特色：五音按滑系统 (吟/猱/按/滑)</span>
                     </h5>
                     <p className="text-[11px] text-cultural-text/90 mt-0.5 leading-relaxed font-sans">
                       潮州筝乐以“活五”等调式扬名：左手在琴码左侧按压琴弦，使“五”（re）等音音高向上游移、颤动滑转，创造极其缠绵深情的悲怨音韵。
@@ -306,7 +444,7 @@ export default function InstrumentWorkshop() {
                     {[
                       { label: '正常律', val: 0, desc: '轻六本音（sol la do re mi）' },
                       { label: '半至微升', val: 0.5, desc: '吟弦微颤' },
-                      { label: '悲怆活五', val: 1.5, desc: '活五颤按（re 音游移）' }
+                      { label: '悲怆活五', val: 1.5, desc: '活五颤按（re 音游移）' },
                     ].map((opt) => (
                       <button
                         key={opt.label}
@@ -346,7 +484,11 @@ export default function InstrumentWorkshop() {
               <span>⚠️ 仿真声学与音色声明:</span>
             </p>
             <p>
-              本琴房采用 <strong>Karplus-Strong 数字波导物理建模</strong>（扬琴、古筝）与<strong>谐波谱弓弦建模 + 卷积厅堂混响</strong>（高胡）实时生成声音，相较早期振荡器包络合成已大幅贴近真实乐器的击弦瞬态、余振衰减与琴体共鸣。但物理建模仍是对真实声学过程的算法仿真，<strong>并非真实乐器录音采样</strong>，红木琴筒、蟒皮与丝弦的个别细微质感无法完全等同现场原声。本系统旨在进行便携式调式教学与文化特征科普。
+              本琴房采用 <strong>Karplus-Strong 数字波导物理建模</strong>（扬琴、潮州筝）与
+              <strong>谐波谱弓弦建模 + 卷积厅堂混响</strong>
+              （高胡）实时生成声音，相较早期振荡器包络合成已大幅贴近真实乐器的击弦瞬态、余振衰减与琴体共鸣。但物理建模仍是对真实声学过程的算法仿真，
+              <strong>并非真实乐器录音采样</strong>
+              ，红木琴筒、蟒皮与丝弦的个别细微质感无法完全等同现场原声。本系统旨在进行便携式调式教学与文化特征科普。
             </p>
           </div>
         </div>
