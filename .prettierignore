@@ -1,0 +1,8 @@
+dist
+release-final
+node_modules
+coverage
+package-lock.json
+docs/images
+*.md
+LICENSE
