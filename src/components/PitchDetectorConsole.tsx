@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: MIT
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { autoCorrelate, getGongcheFromFrequency } from '../utils/pitchDetector';
+import { useState, useEffect, useRef } from 'react';
+import { motion } from 'motion/react';
+import { autoCorrelate, getGongcheFromFrequency, type GongcheMode } from '../utils/pitchDetector';
 import { DetectedNote } from '../types';
-import { Mic, MicOff, Volume2, Circle, Activity, AlertCircle } from 'lucide-react';
+import { Mic, MicOff, Circle, Activity, AlertCircle } from 'lucide-react';
 
 export default function PitchDetectorConsole() {
   const [isListening, setIsListening] = useState<boolean>(false);
@@ -17,17 +17,23 @@ export default function PitchDetectorConsole() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const animFrameRef = useRef<number | null>(null);
   const bufferRef = useRef<Float32Array | null>(null);
 
   // Spark / Contour plot of pitch history to draw beautiful calligraphy line
   const [pitchHistory, setPitchHistory] = useState<number[]>([]);
 
+  // 识谱调式：正线 1=C（合=G）/ 羽调 1=D（合=A，潮州筝、《彩云追月》）
+  const [mode, setMode] = useState<GongcheMode>('zhengxian');
+  const modeRef = useRef<GongcheMode>('zhengxian');
+  modeRef.current = mode;
+
   const startListening = async () => {
     try {
       setErrorMsg(null);
       // Initialize audio context lazily
-      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      const AudioCtxClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtxClass) {
         setErrorMsg('您的浏览器不支持 Web Audio API，无法启用声音识别。');
         return;
@@ -42,17 +48,18 @@ export default function PitchDetectorConsole() {
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
-      
+
       source.connect(analyser);
       analyserRef.current = analyser;
       bufferRef.current = new Float32Array(analyser.fftSize);
 
       setIsListening(true);
       setPitchHistory([]);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Microphone error:', err);
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setErrorMsg('您拒绝了麦克风访问权限。请在浏览器中开启麦克风权限以使用AI声乐识别功能。');
+      const name = err instanceof DOMException ? err.name : '';
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        setErrorMsg('您拒绝了麦克风访问权限。请在浏览器中开启麦克风权限以使用音韵识别功能。');
       } else {
         setErrorMsg('无法访问麦克风。请检查输入设备是否连接正常。');
       }
@@ -64,13 +71,8 @@ export default function PitchDetectorConsole() {
     setCurrentNote(null);
     setPitchHistory([]);
 
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-    }
-
     if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
     }
 
@@ -83,53 +85,48 @@ export default function PitchDetectorConsole() {
     bufferRef.current = null;
   };
 
-  // The analysis loop runs on requestAnimationFrame
-  const updatePitch = () => {
-    if (!isListening || !analyserRef.current || !bufferRef.current || !audioCtxRef.current) return;
-
-    analyserRef.current.getFloatTimeDomainData(bufferRef.current);
-    const sampleRate = audioCtxRef.current.sampleRate;
-    const freq = autoCorrelate(bufferRef.current, sampleRate);
-
-    if (freq > 0) {
-      const match = getGongcheFromFrequency(freq);
-      if (match && match.clarity > 0.4) {
-        setCurrentNote(match);
-        setPitchHistory(prev => {
-          const next = [...prev, freq];
-          // Limit history count to fit the canvas width
-          if (next.length > 80) next.shift();
-          return next;
-        });
-      }
-    }
-
-    animFrameRef.current = requestAnimationFrame(updatePitch);
-  };
-
+  // 分析循环：监听期间以 requestAnimationFrame 采样，按当前所选调式换算工尺字
   useEffect(() => {
-    if (isListening) {
-      animFrameRef.current = requestAnimationFrame(updatePitch);
-    }
-    return () => {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    if (!isListening) return;
+    let raf = 0;
+    const tick = () => {
+      if (analyserRef.current && bufferRef.current && audioCtxRef.current) {
+        analyserRef.current.getFloatTimeDomainData(bufferRef.current);
+        const freq = autoCorrelate(bufferRef.current, audioCtxRef.current.sampleRate);
+        if (freq > 0) {
+          const match = getGongcheFromFrequency(freq, modeRef.current);
+          if (match && match.clarity > 0.4) {
+            setCurrentNote(match);
+            setPitchHistory((prev) => {
+              const next = [...prev, freq];
+              // Limit history count to fit the canvas width
+              if (next.length > 80) next.shift();
+              return next;
+            });
+          }
+        }
+      }
+      raf = requestAnimationFrame(tick);
     };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, [isListening]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      }
-      if (audioCtxRef.current) {
-        audioCtxRef.current.close();
-      }
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      audioCtxRef.current?.close().catch(() => {
+        /* already closed */
+      });
     };
   }, []);
 
   return (
-    <div id="pitch-detector-console" className="bg-cultural-panel rounded-xl border border-cultural-border p-5 shadow-xs space-y-6">
+    <div
+      id="pitch-detector-console"
+      className="bg-cultural-panel rounded-xl border border-cultural-border p-5 shadow-xs space-y-6"
+    >
       {/* Alert Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-cultural-border/40 pb-4 gap-4">
         <div>
@@ -163,6 +160,42 @@ export default function PitchDetectorConsole() {
         </div>
       </div>
 
+      {/* 识谱调式选择 */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="text-xs font-serif font-bold text-cultural-text/70">识谱调式</span>
+        <div
+          role="group"
+          aria-label="识谱调式"
+          className="inline-flex rounded-lg border border-cultural-border overflow-hidden"
+        >
+          {(
+            [
+              { id: 'zhengxian', label: '正线 1=C' },
+              { id: 'yudiao', label: '羽调 1=D' },
+            ] as const
+          ).map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setMode(m.id)}
+              aria-pressed={mode === m.id}
+              className={`px-3.5 py-1.5 text-xs font-serif font-bold transition-colors cursor-pointer ${
+                mode === m.id
+                  ? 'bg-cultural-accent text-white'
+                  : 'bg-cultural-panel text-cultural-text hover:bg-cultural-bg'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-[11px] text-cultural-text/55 font-sans">
+          {mode === 'zhengxian'
+            ? '广东音乐正线，高胡合尺定弦 sol-re（合=G）'
+            : 'D 宫羽调，潮州筝定弦 /《彩云追月》（合=A）'}
+        </span>
+      </div>
+
       {errorMsg && (
         <div className="bg-red-50 text-red-800 text-xs p-4 rounded-xl border border-red-200 flex items-start space-x-2.5">
           <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
@@ -177,7 +210,7 @@ export default function PitchDetectorConsole() {
           <h4 className="text-xs font-serif font-black text-cultural-dark mb-4 uppercase tracking-wider">
             「乐律偏振仪」
           </h4>
-          
+
           <div className="relative w-48 h-48 rounded-full border-4 border-cultural-border/40 flex items-center justify-center bg-white shadow-inner">
             {/* Center ink circle */}
             <div className="absolute inset-4 rounded-full border border-cultural-bg flex flex-col items-center justify-center bg-cultural-panel">
@@ -214,20 +247,30 @@ export default function PitchDetectorConsole() {
             )}
 
             {/* Cents scale annotations */}
-            <span className="absolute top-2 left-1/2 -translate-x-1/2 text-[9px] font-mono text-cultural-text/60 font-bold">0</span>
-            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[9px] font-mono text-cultural-accent/80 font-bold">+50</span>
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[9px] font-mono text-cultural-accent/60 font-bold">-50</span>
+            <span className="absolute top-2 left-1/2 -translate-x-1/2 text-[9px] font-mono text-cultural-text/60 font-bold">
+              0
+            </span>
+            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[9px] font-mono text-cultural-accent/80 font-bold">
+              +50
+            </span>
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[9px] font-mono text-cultural-accent/60 font-bold">
+              -50
+            </span>
           </div>
 
           <div className="mt-4 text-center">
             {currentNote ? (
               <div className="space-y-1">
-                <span className={`text-xs font-serif font-bold px-2.5 py-1 rounded-sm border ${
-                  Math.abs(currentNote.deviation) < 15
-                    ? 'bg-cultural-accent/10 text-cultural-dark border-cultural-border'
-                    : 'bg-cultural-bg text-cultural-accent border-cultural-border/40'
-                }`}>
-                  {Math.abs(currentNote.deviation) < 15 ? '律准 (Perfect)' : `偏差约 ${currentNote.deviation} 音分`}
+                <span
+                  className={`text-xs font-serif font-bold px-2.5 py-1 rounded-sm border ${
+                    Math.abs(currentNote.deviation) < 15
+                      ? 'bg-cultural-accent/10 text-cultural-dark border-cultural-border'
+                      : 'bg-cultural-bg text-cultural-accent border-cultural-border/40'
+                  }`}
+                >
+                  {Math.abs(currentNote.deviation) < 15
+                    ? '律准 (Perfect)'
+                    : `偏差约 ${currentNote.deviation} 音分`}
                 </span>
                 <p className="text-[11px] text-cultural-text/80 pt-1.5 leading-none mt-1 font-sans font-medium">
                   音调清晰度 (Confidence): ({(currentNote.clarity * 100).toFixed(0)}%)
@@ -235,7 +278,9 @@ export default function PitchDetectorConsole() {
               </div>
             ) : (
               <p className="text-xs text-cultural-text/70 italic font-medium font-sans">
-                {isListening ? '请吹口哨、哼唱或使用扬琴试音器' : '开启麦克风后对着电脑哼一首《彩云追月》'}
+                {isListening
+                  ? '请吹口哨、哼唱或使用扬琴试音器'
+                  : '开启麦克风后对着电脑哼一首《彩云追月》'}
               </p>
             )}
           </div>
@@ -262,12 +307,14 @@ export default function PitchDetectorConsole() {
 
                 {/* Draw ink brush stroke */}
                 <path
-                  d={`M ${pitchHistory.map((val, idx) => {
-                    // Map freq bounding from 150 Hz to 900 Hz roughly to viewBox 180 to 20
-                    const y = 180 - ((val - 150) / 750) * 160;
-                    const x = (idx / (pitchHistory.length - 1)) * 500;
-                    return `${x} ${Math.max(10, Math.min(190, y))}`;
-                  }).join(' L ')}`}
+                  d={`M ${pitchHistory
+                    .map((val, idx) => {
+                      // Map freq bounding from 150 Hz to 900 Hz roughly to viewBox 180 to 20
+                      const y = 180 - ((val - 150) / 750) * 160;
+                      const x = (idx / (pitchHistory.length - 1)) * 500;
+                      return `${x} ${Math.max(10, Math.min(190, y))}`;
+                    })
+                    .join(' L ')}`}
                   fill="none"
                   stroke="url(#inkGradient)"
                   strokeWidth="4"
@@ -301,12 +348,18 @@ export default function PitchDetectorConsole() {
           <div className="text-[11px] text-stone-300 leading-relaxed bg-black/30 p-2.5 rounded border border-white/5 font-sans space-y-2">
             <div>
               <span className="text-amber-300 font-bold font-serif mr-1">文化小知识：</span>
-              工尺谱中的<strong className="text-white">“合”</strong>通常对应西方大调的 <strong className="text-amber-200">So (Sol)</strong>， 而 <strong className="text-white">“上”</strong> 对应 <strong className="text-amber-200">Do</strong>。
-              岭南音乐常使用的<strong className="text-amber-200 font-serif">“乙凡调”</strong>会在弹唱“乙”与“凡”两个音时加以左手按揉，创造出独特的微半音差，声音具有极强的情感张力！
+              工尺谱中的<strong className="text-white">“合”</strong>通常对应西方大调的{' '}
+              <strong className="text-amber-200">So (Sol)</strong>， 而{' '}
+              <strong className="text-white">“上”</strong> 对应{' '}
+              <strong className="text-amber-200">Do</strong>。 岭南音乐常使用的
+              <strong className="text-amber-200 font-serif">“乙凡调”</strong>
+              会在弹唱“乙”与“凡”两个音时加以左手按揉，创造出独特的微半音差，声音具有极强的情感张力！
             </div>
             <div className="pt-2 border-t border-white/10 text-stone-400 text-[10px]">
               <span className="text-amber-400 font-bold">🎙️ 拾音仿真与识别率声明：</span>
-              本音高检测仪基于纯前端自相关物理解析（Autocorrelation）实时抓取频率，不使用第三方网联API。由于室内回声、麦克风性能、硬件过滤机制各异，计算结果属于高灵敏度数学模拟换算，<strong>无法100%媲美</strong>专业乐器调音设备；特别是当演唱中带有岭南特色的按揉滑音时，探测折线偶有波动均属声学物理仿真的正常波动范围。
+              本音高检测仪基于纯前端自相关物理解析（Autocorrelation）实时抓取频率，不使用第三方网联API。由于室内回声、麦克风性能、硬件过滤机制各异，计算结果属于高灵敏度数学模拟换算，
+              <strong>无法100%媲美</strong>
+              专业乐器调音设备；特别是当演唱中带有岭南特色的按揉滑音时，探测折线偶有波动均属声学物理仿真的正常波动范围。
             </div>
           </div>
         </div>

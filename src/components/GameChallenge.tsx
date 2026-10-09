@@ -3,35 +3,77 @@
  * SPDX-License-Identifier: MIT
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { REPERTOIRES } from '../data/musicData';
-import { Repertoire, SongNote } from '../types';
-import { autoCorrelate, getGongcheFromFrequency } from '../utils/pitchDetector';
+import { Repertoire, InstrumentId, type DetectedNote } from '../types';
+import { autoCorrelate, getGongcheFromFrequency, getGongcheTable } from '../utils/pitchDetector';
 import { playGaohu, playYangqin, playZheng } from '../utils/audioSynth';
-import { Play, Square, RotateCcw, Award, Sparkles, Volume2, Mic, CheckCircle, ChevronLeft, ChevronRight } from 'lucide-react';
-import { InstrumentId } from '../types';
+import { Play, Square, CheckCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+
+// 工尺字 → 首调唱名（工尺谱为首调体系：合=sol、上=do、尺=re……）
+const SOLFEGE_BY_GONGCHE: Record<string, string> = {
+  合: 'sol',
+  四: 'la',
+  一: 'si',
+  上: 'do',
+  尺: 're',
+  工: 'mi',
+  凡: 'fa',
+  六: 'sol',
+  五: 'la',
+  乙: 'si',
+  仩: 'do',
+  伬: 're',
+  仜: 'mi',
+  仮: 'fa',
+  六高: 'sol',
+  五高: 'la',
+  休: '—',
+};
+
+type NotationMode = 'gongche' | 'pitch' | 'solfege';
+const NOTATION_TABS: { id: NotationMode; label: string }[] = [
+  { id: 'gongche', label: '工尺谱' },
+  { id: 'pitch', label: '音名' },
+  { id: 'solfege', label: '唱名' },
+];
 
 // 十二平均律频率表（A4=440），覆盖三首曲目全部音域
 const NOTE_FREQUENCIES: { [key: string]: number } = {
-  'G3': 196.00, 'A3': 220.00, 'B3': 246.94,
-  'C4': 261.63, 'C#4': 277.18, 'D4': 293.66, 'E4': 329.63,
-  'F4': 349.23, 'F#4': 369.99, 'G4': 392.00, 'A4': 440.00,
-  'B4': 493.88,
-  'C5': 523.25, 'C#5': 554.37, 'D5': 587.33, 'E5': 659.25,
-  'F5': 698.46, 'F#5': 739.99, 'G5': 783.99, 'A5': 880.00,
-  'B5': 987.77, 'C6': 1046.50
+  G3: 196.0,
+  A3: 220.0,
+  B3: 246.94,
+  C4: 261.63,
+  'C#4': 277.18,
+  D4: 293.66,
+  E4: 329.63,
+  F4: 349.23,
+  'F#4': 369.99,
+  G4: 392.0,
+  A4: 440.0,
+  B4: 493.88,
+  C5: 523.25,
+  'C#5': 554.37,
+  D5: 587.33,
+  E5: 659.25,
+  F5: 698.46,
+  'F#5': 739.99,
+  G5: 783.99,
+  A5: 880.0,
+  B5: 987.77,
+  C6: 1046.5,
 };
 
 const INSTRUMENT_NAMES: Record<InstrumentId, string> = {
   gaohu: '高胡',
   yangqin: '扬琴',
-  zheng: '潮州筝'
+  zheng: '潮州筝',
 };
 
 export default function GameChallenge() {
   const [selectedSong, setSelectedSong] = useState<Repertoire>(
-    REPERTOIRES.find(r => r.id === 'yudabajiao') || REPERTOIRES[0]
+    REPERTOIRES.find((r) => r.id === 'yudabajiao') || REPERTOIRES[0]
   );
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentNoteIndex, setCurrentNoteIndex] = useState<number>(-1);
@@ -40,7 +82,9 @@ export default function GameChallenge() {
 
   // Use either internal synthesizer or mic pitch for game scoring!
   const [useMicInput, setUseMicInput] = useState<boolean>(false);
-  const [detectedPitch, setDetectedPitch] = useState<string | null>(null);
+  const [liveNote, setLiveNote] = useState<DetectedNote | null>(null); // 麦克风实时演唱反馈
+  const [notationMode, setNotationMode] = useState<NotationMode>('gongche'); // 谱式显示切换
+  const [finished, setFinished] = useState<boolean>(false); // 是否自然演奏完一遍
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -62,8 +106,8 @@ export default function GameChallenge() {
         const childOffset = activeChild.offsetLeft;
         const childWidth = activeChild.clientWidth;
         container.scrollTo({
-          left: childOffset - (containerWidth / 2) + (childWidth / 2),
-          behavior: 'smooth'
+          left: childOffset - containerWidth / 2 + childWidth / 2,
+          behavior: 'smooth',
         });
       }
     }
@@ -78,7 +122,9 @@ export default function GameChallenge() {
 
   const startMic = async () => {
     try {
-      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      const AudioCtxClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtxClass) return;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
@@ -101,7 +147,7 @@ export default function GameChallenge() {
 
   const stopMic = () => {
     if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
     }
     if (audioCtxRef.current) {
@@ -146,6 +192,8 @@ export default function GameChallenge() {
     setScore(0);
     setTotalHits(0);
     setHasScoredCurrentNote(false);
+    setFinished(false);
+    setLiveNote(null);
 
     let currentIndex = 0;
     const notes = selectedSong.notes;
@@ -153,7 +201,7 @@ export default function GameChallenge() {
 
     const runGameTick = () => {
       if (currentIndex >= notes.length) {
-        stopSong();
+        finishSong();
         return;
       }
 
@@ -181,7 +229,20 @@ export default function GameChallenge() {
   const stopSong = () => {
     setIsPlaying(false);
     setCurrentNoteIndex(-1);
-    setDetectedPitch(null);
+    setLiveNote(null);
+    setFinished(false);
+    if (intervalIdRef.current) {
+      clearTimeout(intervalIdRef.current);
+      intervalIdRef.current = null;
+    }
+  };
+
+  // 自然演奏完一遍：停止计时但保留得分，用于展示结算面板
+  const finishSong = () => {
+    setIsPlaying(false);
+    setCurrentNoteIndex(-1);
+    setLiveNote(null);
+    setFinished(true);
     if (intervalIdRef.current) {
       clearTimeout(intervalIdRef.current);
       intervalIdRef.current = null;
@@ -205,12 +266,12 @@ export default function GameChallenge() {
         if (freq > 0) {
           const match = getGongcheFromFrequency(freq, selectedSong.mode);
           if (match && match.clarity > 0.4) {
-            setDetectedPitch(match.gongche);
-            
+            setLiveNote(match);
+
             // Check if matches the desired target note character
             if (match.gongche === targetNote.gongche) {
-              setScore(prev => prev + 10);
-              setTotalHits(prev => prev + 1);
+              setScore((prev) => prev + 10);
+              setTotalHits((prev) => prev + 1);
               setHasScoredCurrentNote(true);
               clearInterval(checkMicInterval);
             }
@@ -225,11 +286,11 @@ export default function GameChallenge() {
   // Handle manual click playing score (making the app 100% playable offline, even without mic!)
   const triggerManualPlayMatch = (noteGongche: string) => {
     if (!isPlaying || currentNoteIndex < 0 || hasScoredCurrentNote) return;
-    
+
     const targetNote = selectedSong.notes[currentNoteIndex];
     if (targetNote && targetNote.gongche === noteGongche) {
-      setScore(prev => prev + 10);
-      setTotalHits(prev => prev + 1);
+      setScore((prev) => prev + 10);
+      setTotalHits((prev) => prev + 1);
       setHasScoredCurrentNote(true);
 
       // Play matching synth confirmation
@@ -241,18 +302,66 @@ export default function GameChallenge() {
   };
 
   // 准确率分母不含休止符
-  const scoredNoteCount = selectedSong.notes.filter(n => !n.rest).length;
-  const accuracyRate = scoredNoteCount > 0
-    ? Math.round((totalHits / scoredNoteCount) * 100)
-    : 0;
+  const scoredNoteCount = selectedSong.notes.filter((n) => !n.rest).length;
+  const accuracyRate = scoredNoteCount > 0 ? Math.round((totalHits / scoredNoteCount) * 100) : 0;
 
   // 屏幕工尺键盘按曲目调式生成
-  const keyboardKeys = selectedSong.mode === 'yudiao'
-    ? ['合', '四', '一', '上', '尺', '工', '凡', '六', '五', '乙', '仩']
-    : ['合', '四', '一', '上', '尺', '工', '凡', '六', '五', '乙', '仩', '伬', '仜', '仮', '六高', '五高'];
+  const keyboardKeys =
+    selectedSong.mode === 'yudiao'
+      ? ['合', '四', '一', '上', '尺', '工', '凡', '六', '五', '乙', '仩']
+      : [
+          '合',
+          '四',
+          '一',
+          '上',
+          '尺',
+          '工',
+          '凡',
+          '六',
+          '五',
+          '乙',
+          '仩',
+          '伬',
+          '仜',
+          '仮',
+          '六高',
+          '五高',
+        ];
+
+  // 当前调式 工尺字 → 音名，用于三种谱式对照
+  const pitchByGongche: Record<string, string> = Object.fromEntries(
+    getGongcheTable(selectedSong.mode).map((row) => [row.char, row.note])
+  );
+  const renderNotation = (gongche: string, mode: NotationMode): string => {
+    if (mode === 'pitch') return pitchByGongche[gongche] ?? gongche;
+    if (mode === 'solfege') return SOLFEGE_BY_GONGCHE[gongche] ?? gongche;
+    return gongche;
+  };
+
+  // 当前需要演唱 / 弹奏的目标非休止音（用于实时反馈对照）
+  const activeTarget = currentNoteIndex >= 0 ? selectedSong.notes[currentNoteIndex] : undefined;
+  const liveCents =
+    liveNote && activeTarget && !activeTarget.rest
+      ? Math.round(
+          1200 *
+            Math.log2(
+              liveNote.frequency / (NOTE_FREQUENCIES[activeTarget.pitch] || liveNote.frequency)
+            )
+        )
+      : 0;
+
+  const verdict =
+    accuracyRate >= 90
+      ? '粤韵传神，字正腔圆！'
+      : accuracyRate >= 60
+        ? '初窥门径，再练几遍便能连贯成曲。'
+        : '多听几遍示范、放慢速度，留意每个工尺字的音高。';
 
   return (
-    <div id="game-challenge" className="bg-cultural-panel rounded-xl border border-cultural-border p-5 shadow-xs space-y-6">
+    <div
+      id="game-challenge"
+      className="bg-cultural-panel rounded-xl border border-cultural-border p-5 shadow-xs space-y-6"
+    >
       {/* Game Selector Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-cultural-border/40 pb-4 gap-4">
         <div>
@@ -260,7 +369,9 @@ export default function GameChallenge() {
             <span>《乐律挑战》交互式曲谱跟弹与视唱</span>
           </h3>
           <p className="text-xs text-cultural-text/80 mt-1 max-w-xl">
-            选择经典岭南曲谱。点击【开始合奏】后，主乐器将自动示范。你可以唱歌、吹笛（通过麦克风），或者在屏幕底部的「工尺谱键盘」上<strong className="text-cultural-accent font-black">快速点击相同的音符</strong>进行合奏，挑战完美的广东民乐大合奏！
+            选择经典岭南曲谱。点击【开始合奏】后，主乐器将自动示范。你可以唱歌、吹笛（通过麦克风），或者在屏幕底部的「工尺谱键盘」上
+            <strong className="text-cultural-accent font-black">快速点击相同的音符</strong>
+            进行合奏，挑战完美的广东民乐大合奏！
           </p>
         </div>
 
@@ -269,8 +380,9 @@ export default function GameChallenge() {
           <span className="text-xs text-cultural-text font-bold">切换曲谱:</span>
           <select
             value={selectedSong.id}
+            aria-label="选择曲目"
             onChange={(e) => {
-              const song = REPERTOIRES.find(r => r.id === e.target.value);
+              const song = REPERTOIRES.find((r) => r.id === e.target.value);
               if (song) {
                 stopSong();
                 setSelectedSong(song);
@@ -280,7 +392,9 @@ export default function GameChallenge() {
             className="text-xs px-3 py-1.5 bg-cultural-bg border border-cultural-border rounded font-serif font-bold text-cultural-dark focus:outline-none cursor-pointer"
           >
             {REPERTOIRES.map((r) => (
-              <option key={r.id} value={r.id}>{r.title}</option>
+              <option key={r.id} value={r.id}>
+                {r.title}
+              </option>
             ))}
           </select>
         </div>
@@ -289,23 +403,63 @@ export default function GameChallenge() {
       {/* Repertoire details */}
       <div className="p-4 bg-cultural-accent/5 rounded-xl border border-cultural-border/70 grid grid-cols-1 md:grid-cols-12 gap-4">
         <div className="md:col-span-8 space-y-1">
-          <span className="text-[10px] bg-cultural-accent text-white px-2 py-0.5 rounded-sm font-bold font-serif border border-cultural-border/20">曲目赏析</span>
+          <span className="text-[10px] bg-cultural-accent text-white px-2 py-0.5 rounded-sm font-bold font-serif border border-cultural-border/20">
+            曲目赏析
+          </span>
           <h4 className="text-sm font-serif font-black text-cultural-dark">{selectedSong.title}</h4>
           <p className="text-xs text-cultural-text leading-relaxed">{selectedSong.description}</p>
         </div>
         <div className="md:col-span-4 border-t md:border-t-0 md:border-l border-cultural-border/50 pt-3 md:pt-0 md:pl-4 flex flex-col justify-between">
           <div className="text-xs text-cultural-text/90 font-sans">
             <div className="font-bold text-cultural-dark font-serif">演奏要领:</div>
-            <p className="italic mt-1 text-[11px] font-serif pr-2 leading-relaxed">{selectedSong.lyricContext}</p>
+            <p className="italic mt-1 text-[11px] font-serif pr-2 leading-relaxed">
+              {selectedSong.lyricContext}
+            </p>
           </div>
           <div className="text-[10px] text-cultural-accent font-serif mt-2 font-black space-y-0.5">
             <div>主奏乐器：{INSTRUMENT_NAMES[selectedSong.instrument]}</div>
-            <div>调式：{selectedSong.mode === 'zhengxian' ? '正线（1=C · 合尺定弦 sol-re）' : '五声羽调（1=D · D宫B羽）'}</div>
+            <div>
+              调式：
+              {selectedSong.mode === 'zhengxian'
+                ? '正线（1=C · 合尺定弦 sol-re）'
+                : '五声羽调（1=D · D宫B羽）'}
+            </div>
             {selectedSong.instrument === 'gaohu' && (
-              <div className="text-cultural-text/70 font-sans font-medium">注：高胡实际发音比谱面高纯八度，跟唱按谱面中音即可。</div>
+              <div className="text-cultural-text/70 font-sans font-medium">
+                注：高胡实际发音比谱面高纯八度，跟唱按谱面中音即可。
+              </div>
             )}
           </div>
         </div>
+      </div>
+
+      {/* 谱式显示切换：工尺谱 / 音名 / 首调唱名 三式对照 */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="text-xs font-serif font-bold text-cultural-text/70">谱式显示</span>
+        <div
+          role="group"
+          aria-label="谱式显示切换"
+          className="inline-flex rounded-lg border border-cultural-border overflow-hidden"
+        >
+          {NOTATION_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setNotationMode(t.id)}
+              aria-pressed={notationMode === t.id}
+              className={`px-3.5 py-1.5 text-xs font-serif font-bold transition-colors cursor-pointer ${
+                notationMode === t.id
+                  ? 'bg-cultural-accent text-white'
+                  : 'bg-cultural-panel text-cultural-text hover:bg-cultural-bg'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-[11px] text-cultural-text/55 font-sans">
+          同一旋律可在工尺谱、五线谱音名与首调唱名之间切换对照
+        </span>
       </div>
 
       {/* Traditional Stave Scroll Area (Scroll of Bamboo Strips 竹简乐谱) */}
@@ -313,7 +467,10 @@ export default function GameChallenge() {
         {/* Background bamboos simulation */}
         <div className="absolute inset-0 flex justify-around pointer-events-none opacity-20">
           {Array.from({ length: 16 }).map((_, i) => (
-            <div key={i} className="w-4 h-full border-r border-cultural-accent/40 bg-cultural-accent/5" />
+            <div
+              key={i}
+              className="w-4 h-full border-r border-cultural-accent/40 bg-cultural-accent/5"
+            />
           ))}
         </div>
 
@@ -324,6 +481,7 @@ export default function GameChallenge() {
             {isPlaying ? (
               <button
                 onClick={stopSong}
+                aria-label="停止合奏"
                 className="w-12 h-12 rounded-full bg-cultural-dark hover:bg-cultural-dark/90 text-white flex items-center justify-center cursor-pointer shadow border-2 border-cultural-border transition-all"
               >
                 <Square className="w-5 h-5 fill-white" />
@@ -331,6 +489,7 @@ export default function GameChallenge() {
             ) : (
               <button
                 onClick={startSong}
+                aria-label="开始合奏"
                 className="w-12 h-12 rounded-full bg-cultural-accent hover:bg-cultural-accent/95 text-white flex items-center justify-center cursor-pointer shadow border-2 border-cultural-border/20 transition-all"
               >
                 <Play className="w-5 h-5 fill-white translate-x-0.5" />
@@ -359,16 +518,64 @@ export default function GameChallenge() {
           {/* Stats Badges */}
           <div className="flex items-center space-x-4">
             <div className="text-right">
-              <div className="text-[10px] text-cultural-text/60 font-mono font-bold">得分 / SCORE</div>
+              <div className="text-[10px] text-cultural-text/60 font-mono font-bold">
+                得分 / SCORE
+              </div>
               <div className="text-xl font-serif font-black text-cultural-accent">{score}</div>
             </div>
 
             <div className="text-right border-l border-cultural-border pl-4">
-              <div className="text-[10px] text-cultural-text/60 font-mono font-bold">命中 / ACCURACY</div>
-              <div className="text-xl font-serif font-black text-cultural-accent">{accuracyRate}%</div>
+              <div className="text-[10px] text-cultural-text/60 font-mono font-bold">
+                命中 / ACCURACY
+              </div>
+              <div className="text-xl font-serif font-black text-cultural-accent">
+                {accuracyRate}%
+              </div>
             </div>
           </div>
         </div>
+
+        {/* 麦克风实时演唱反馈 */}
+        {useMicInput && (
+          <div
+            aria-live="polite"
+            className="relative z-10 mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 bg-white/70 border border-cultural-border/60 rounded-lg px-4 py-2.5"
+          >
+            {liveNote && activeTarget && !activeTarget.rest ? (
+              <>
+                <span className="flex items-center gap-2">
+                  <span className="w-8 h-8 rounded-full bg-cultural-accent text-white font-serif font-black flex items-center justify-center">
+                    {liveNote.gongche}
+                  </span>
+                  <span className="text-xs font-mono font-bold text-cultural-dark">
+                    {liveNote.pitch} · {liveNote.frequency}Hz
+                  </span>
+                </span>
+                <span className="text-[11px] text-cultural-text/75 font-sans">
+                  目标 <strong className="font-serif">{activeTarget.gongche}</strong>（
+                  {activeTarget.pitch}）
+                </span>
+                {liveNote.gongche === activeTarget.gongche ? (
+                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-0.5">
+                    ✓ 命中，音准
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5">
+                    {liveCents > 20
+                      ? `偏高约 ${liveCents} 音分`
+                      : liveCents < -20
+                        ? `偏低约 ${-liveCents} 音分`
+                        : '很接近，再稳住一点'}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="text-[11px] text-cultural-text/60 font-sans">
+                对准当前高亮音符哼唱或演奏，这里会实时显示你唱出的工尺字、音名与音分偏差…
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Scrollable grid representing Notes with Manual/Auto Scrolling capabilities */}
         <div className="relative group/scroll mt-6">
@@ -381,6 +588,7 @@ export default function GameChallenge() {
             }}
             className="absolute left-1 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white hover:bg-cultural-panel border border-cultural-border shadow-md flex items-center justify-center text-cultural-accent transition-all z-20 cursor-pointer hover:scale-110 active:scale-95"
             title="向左滚动"
+            aria-label="乐谱向左滚动"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
@@ -403,9 +611,17 @@ export default function GameChallenge() {
                         : 'bg-cultural-panel border-cultural-border/50'
                   }`}
                 >
-                  {/* Gongche large character */}
-                  <span className={`text-xl font-serif font-black mt-2 ${note.rest ? 'text-cultural-text/40' : isActive ? 'text-cultural-dark' : 'text-cultural-text/85'}`}>
-                    {note.gongche}
+                  {/* 主记法（随谱式切换） */}
+                  <span
+                    className={`text-xl font-serif font-black mt-2 ${note.rest ? 'text-cultural-text/40' : isActive ? 'text-cultural-dark' : 'text-cultural-text/85'}`}
+                  >
+                    {note.rest
+                      ? notationMode === 'pitch'
+                        ? '0'
+                        : notationMode === 'solfege'
+                          ? '—'
+                          : '休'
+                      : renderNotation(note.gongche, notationMode)}
                   </span>
 
                   {/* Score indicator glow if scored */}
@@ -419,12 +635,24 @@ export default function GameChallenge() {
                     </motion.div>
                   )}
 
-                  {/* Music pitch & Duration label */}
+                  {/* 互补记法与拍数：唱名模式下显示音名，其余显示首调唱名 */}
                   <div className="mb-2 text-center">
-                    <span className="text-[10px] font-mono text-cultural-text/60 font-bold block">{note.rest ? '0 休止' : note.pitch}</span>
-                    <span className="text-[8px] text-cultural-accent font-bold block font-sans bg-cultural-bg px-1 rounded inline-block mt-0.5">
-                      {note.duration} 拍
-                    </span>
+                    {note.rest ? (
+                      <span className="text-[10px] font-mono text-cultural-text/50 font-bold block">
+                        0 休止
+                      </span>
+                    ) : (
+                      <>
+                        <span className="text-[10px] font-mono text-cultural-text/60 font-bold block">
+                          {notationMode === 'solfege'
+                            ? note.pitch
+                            : SOLFEGE_BY_GONGCHE[note.gongche]}
+                        </span>
+                        <span className="text-[8px] text-cultural-accent font-bold block font-sans bg-cultural-bg px-1 rounded inline-block mt-0.5">
+                          {note.duration} 拍
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               );
@@ -440,6 +668,7 @@ export default function GameChallenge() {
             }}
             className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white hover:bg-cultural-panel border border-cultural-border shadow-md flex items-center justify-center text-cultural-accent transition-all z-20 cursor-pointer hover:scale-110 active:scale-95"
             title="向右滚动"
+            aria-label="乐谱向右滚动"
           >
             <ChevronRight className="w-5 h-5" />
           </button>
@@ -460,21 +689,61 @@ export default function GameChallenge() {
             return (
               <motion.button
                 key={char}
+                type="button"
                 whileTap={{ scale: 0.94 }}
                 onClick={() => triggerManualPlayMatch(char)}
+                aria-pressed={!!isAwaited}
+                aria-label={`工尺音键 ${char}${
+                  pitchByGongche[char] ? `，音名 ${pitchByGongche[char]}` : ''
+                }，唱名 ${SOLFEGE_BY_GONGCHE[char] ?? ''}`}
                 className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
                   isAwaited
                     ? 'bg-cultural-accent border-cultural-accent text-white font-bold animate-pulse shadow-md'
                     : 'bg-white hover:bg-cultural-panel text-cultural-text border-cultural-border/60'
                 }`}
               >
-                <div className="font-serif text-lg font-black">{char}</div>
-                <div className="text-[9px] font-mono text-cultural-text/50 mt-1">按键合奏</div>
+                <div className="font-serif text-lg font-black">
+                  {renderNotation(char, notationMode)}
+                </div>
+                <div
+                  className={`text-[9px] font-mono mt-1 ${
+                    isAwaited ? 'text-white/80' : 'text-cultural-text/50'
+                  }`}
+                >
+                  {notationMode === 'gongche'
+                    ? '按键合奏'
+                    : `${char} · ${SOLFEGE_BY_GONGCHE[char] ?? ''}`}
+                </div>
               </motion.button>
             );
           })}
         </div>
       </div>
+
+      {/* 演奏结算面板 */}
+      <AnimatePresence>
+        {finished && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-cultural-accent/5 border border-cultural-border rounded-xl p-6 text-center space-y-3"
+          >
+            <CheckCircle className="w-10 h-10 text-cultural-accent mx-auto" />
+            <h4 className="font-serif font-black text-lg text-cultural-dark">本轮合奏完成</h4>
+            <div className="text-sm font-mono font-bold text-cultural-dark">
+              命中 {totalHits} / {scoredNoteCount} 音 · 准确率 {accuracyRate}%
+            </div>
+            <p className="text-xs text-cultural-text/80 font-serif italic">{verdict}</p>
+            <button
+              type="button"
+              onClick={startSong}
+              className="px-5 py-2 rounded-lg bg-cultural-accent hover:bg-cultural-accent/90 text-white font-serif font-bold text-sm cursor-pointer"
+            >
+              再来一遍
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
