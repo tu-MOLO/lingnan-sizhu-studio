@@ -4,15 +4,15 @@
 A zero-sample, physics-based Cantonese traditional music studio — synthesize the Gaohu (高胡), Yangqin (扬琴) and Chaozhou Zheng (潮州筝), and bring the Gongche notation (工尺谱) to life in the browser.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-5A5A40.svg)](LICENSE)
-[![CI](https://github.com/OWNER/lingnan-sizhu-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/lingnan-sizhu-studio/actions/workflows/ci.yml)
+[![CI](https://github.com/tu-MOLO/lingnan-sizhu-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/tu-MOLO/lingnan-sizhu-studio/actions/workflows/ci.yml)
 ![tests](https://img.shields.io/badge/tests-59%20passed-5A8A5A)
 ![zero samples](<https://img.shields.io/badge/audio-zero%20samples-5A5A40>)
 ![no backend](https://img.shields.io/badge/backend-none-D1CEC7)
 ![no API key](<https://img.shields.io/badge/API%20key-not%20required-D1CEC7>)
 
-> 🚀 **在线 Demo**：推送到 GitHub 并在仓库 **Settings → Pages → Source: GitHub Actions** 后，将由 `.github/workflows/deploy.yml` 自动发布到 `https://<你的用户名>.github.io/lingnan-sizhu-studio/`。在此之前可本地 `npm run dev` 立即体验。
->
-> 📌 **首次发布前**：请把本文件中 CI 徽章链接里的 `OWNER` 与 Demo 地址里的 `<你的用户名>` 统一替换为你的 GitHub 用户名。这是**项目站点（Project Pages）**，一个账号可以创建任意多个，不会占用唯一的个人主页站点。
+> 🚀 **在线 Demo**：每次推送 `main` 后由 `.github/workflows/deploy.yml` 自动构建发布到
+> <https://tu-molo.github.io/lingnan-sizhu-studio/>（首次需在仓库 **Settings → Pages → Source**
+> 选择 **GitHub Actions**）。本地也可运行 `npm run dev` 立即体验。
 
 ---
 
