@@ -7,9 +7,37 @@ files:
   - dist/**/*
   - main.js
   - package.json
+# 项目无原生依赖，跨平台打包时跳过 node-gyp 重建
+npmRebuild: false
+
 win:
   target:
     - target: portable
+    - target: nsis
   icon: public/favicon.ico
 portable:
+  artifactName: LingnanSizhuStudio-${version}-portable.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: LingnanSizhuStudio-${version}-setup.${ext}
+
+mac:
+  category: public.app-category.music
+  # 仓库未提供 .icns 图标时使用 Electron 默认图标，以免 CI 因缺图标失败；
+  # 如需自定义，可放入 build/icon.icns（≥512×512）后在此指定 icon。
+  target:
+    - target: dmg
+    - target: zip
+dmg:
   artifactName: LingnanSizhuStudio-${version}.${ext}
+
+linux:
+  category: Audio;Music;Education
+  maintainer: Molo
+  target:
+    - target: AppImage
+    - target: tar.gz
+appImage:
+  artifactName: LingnanSizhuStudio-${version}-x86_64.AppImage

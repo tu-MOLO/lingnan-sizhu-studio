@@ -1,0 +1,90 @@
+name: Build Desktop Release
+
+# 推送 v* 标签时自动构建三平台桌面安装包并发布到 GitHub Release；
+# 也可在 Actions 页面手动触发（手动触发只构建并上传 artifact，不强制发布）。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build on ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            pack: '--win'
+          - os: macos-latest
+            platform: macos
+            pack: '--mac'
+          - os: ubuntu-latest
+            platform: linux
+            pack: '--linux'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web bundle
+        run: npm run build
+
+      - name: Package with electron-builder
+        env:
+          # 未配置签名凭据时跳过自动签名 / 公证，保证 CI 可产出未签名安装包。
+          # 如需签名：Windows 配置 CSC_LINK / CSC_KEY_PASSWORD；
+          # macOS 配置 APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID 并移除此变量。
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder ${{ matrix.pack }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.platform }}
+          path: |
+            release-final/*.exe
+            release-final/*.dmg
+            release-final/*.zip
+            release-final/*.AppImage
+            release-final/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    # 仅在推送版本标签时发布；手动触发不创建 Release。
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            artifacts/*.exe
+            artifacts/*.dmg
+            artifacts/*.zip
+            artifacts/*.AppImage
+            artifacts/*.tar.gz
