@@ -17,6 +17,9 @@ release-final/
 # AI Studio / agent tooling markers
 .aistudio
 
+# Internal planning notes (kept locally, not published)
+docs/OPEN_SOURCE_PLAN.md
+
 # Logs and temporary files
 *.log
 *.tmp
