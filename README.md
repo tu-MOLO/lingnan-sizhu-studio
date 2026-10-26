@@ -10,9 +10,8 @@ A zero-sample, physics-based Cantonese traditional music studio — synthesize t
 ![no backend](https://img.shields.io/badge/backend-none-D1CEC7)
 ![no API key](<https://img.shields.io/badge/API%20key-not%20required-D1CEC7>)
 
-> 🚀 **在线 Demo**：每次推送 `main` 后由 `.github/workflows/deploy.yml` 自动构建发布到
-> <https://tu-molo.github.io/lingnan-sizhu-studio/>
-> 。本地也可运行 `npm run dev` 立即体验。
+> 🚀 **在线 Demo**：<https://tu-molo.github.io/lingnan-sizhu-studio/>
+> 每次推送 `main` 后由 `.github/workflows/deploy.yml` 自动构建部署；本地也可 `npm run dev` 立即体验。
 
 ---
 
